@@ -154,7 +154,72 @@ def run_rwr_guild(G: nx.Graph,
                   seeds: List[str],
                   restart: float = 0.5,
                   max_iter: int = 50,
-                  tol: float = 1e-6) -> Dict[str, float]:
+                  tol: float = 1e-6,
+                  use_weights: bool = False) -> Dict[str, float]:
+    """
+    Random Walk with Restart (RWR).
+    Si use_weights=True, el reparto a vecinos se hace proporcional al peso de la arista.
+    """
+    if not seeds:
+        raise ValueError("No hay semillas válidas presentes en la red.")
+
+    nodes = list(G.nodes())
+    idx = {n: i for i, n in enumerate(nodes)}
+    n = len(nodes)
+
+    # p0: prob. uniforme sobre semillas
+    p0 = np.zeros(n, dtype=float)
+    for s in seeds:
+        p0[idx[s]] = 1.0
+    p0 /= p0.sum()
+
+    # Denominador por nodo: suma de pesos (o grado si no usamos pesos)
+    den = np.zeros(n, dtype=float)
+    for u in nodes:
+        if use_weights:
+            s = 0.0
+            for _, data in G[u].items():
+                s += float(data.get("weight", 1.0))
+            den[idx[u]] = s if s > 0 else 1.0
+        else:
+            d = G.degree(u)
+            den[idx[u]] = float(d) if d > 0 else 1.0
+
+    p = p0.copy()
+    for _ in tqdm(range(max_iter), desc="Iterando RWR"):
+        new_p = np.zeros_like(p)
+        if use_weights:
+            # Reparto proporcional a pesos
+            for u in nodes:
+                pu = p[idx[u]] / den[idx[u]]
+                if pu == 0.0:
+                    continue
+                for v, data in G[u].items():
+                    w = float(data.get("weight", 1.0))
+                    new_p[idx[v]] += pu * w
+        else:
+            # Reparto uniforme 1/deg
+            for u in nodes:
+                pu = p[idx[u]] / den[idx[u]]
+                if pu == 0.0:
+                    continue
+                for v in G.neighbors(u):
+                    new_p[idx[v]] += pu
+
+        # Restart
+        new_p = (1.0 - restart) * new_p + restart * p0
+
+        s = new_p.sum()
+        if s > 0:
+            new_p /= s
+
+        if np.linalg.norm(new_p - p, 1) < tol:
+            p = new_p
+            break
+        p = new_p
+
+    return {nodes[i]: float(p[i]) for i in range(n)}
+
     """
     Implementación sencilla de Random Walk with Restart (RWR).
 
@@ -225,6 +290,9 @@ def main():
     parser.add_argument("--max-iter", type=int, default=50, help="Número máximo de iteraciones")
     parser.add_argument("--tol", type=float, default=1e-6, help="Tolerancia de convergencia")
     parser.add_argument("--k", type=int, default=200, help="Número de nodos a añadir (DIAMOnD)")
+    parser.add_argument("--use-weights", action="store_true",
+                    help="Usar el peso de las aristas (p.ej., combined_score) en la difusión")
+
     args = parser.parse_args()
 
     # --- 1. Cargar red ---
@@ -239,7 +307,7 @@ def main():
     # --- 3. Ejecutar algoritmo ---
     if args.algo == "guild":
         print("[INFO] Ejecutando propagación tipo GUILD (RWR)...")
-        scores = run_rwr_guild(G, seeds, restart=args.restart, max_iter=args.max_iter, tol=args.tol)
+        scores = run_rwr_guild(G, seeds, restart=args.restart, max_iter=args.max_iter, tol=args.tol, use_weights=args.use_weights)
 
         # Guardar resultados
         df = pd.DataFrame(sorted(scores.items(), key=lambda x: x[1], reverse=True),
