@@ -1,0 +1,7 @@
+# Dependencias del proyecto Tarea 2: Network Propagation
+pandas
+networkx
+numpy
+tqdm
+mygene
+
