@@ -274,6 +274,29 @@ def run_diamond_stub(G: nx.Graph, seeds: List[str], k: int = 200) -> pd.DataFram
     print("[AVISO] Algoritmo DIAMOnD-lite aún no implementado.", file=sys.stderr)
     return pd.DataFrame(columns=["node", "pvalue", "step"])
 
+def run_rwr_nx(G: nx.Graph, seeds: List[str], restart: float = 0.5) -> Dict[str, float]:
+    """
+    Versión rápida del RWR usando networkx.pagerank con vector de personalización.
+    En PageRank: alpha = damping ≈ 1 - restart.
+    """
+    if not seeds:
+        raise ValueError("No hay semillas válidas presentes en la red.")
+
+    damping = 1.0 - restart  # PageRank usa 'alpha' como prob. de continuar
+    personalization = {n: 0.0 for n in G}
+    w = 1.0 / len(seeds)
+    for s in seeds:
+        personalization[s] = w
+
+    scores = nx.pagerank(G, alpha=damping,
+                         personalization=personalization,
+                         weight="weight")
+    # Normaliza (por seguridad)
+    s = sum(scores.values())
+    if s > 0:
+        scores = {k: v / s for k, v in scores.items()}
+    return scores
+
 
 # ============================================================
 # PROGRAMA PRINCIPAL (CLI)
@@ -296,6 +319,9 @@ def main():
                     help="Excluir semillas del archivo de salida")
     parser.add_argument("--top", type=int, default=0,
                     help="Si >0, limitar la salida a los top-N nodos")
+    parser.add_argument("--nx-pagerank", action="store_true",
+                    help="Usar networkx.pagerank con personalization (versión rápida de RWR)")
+
 
     args = parser.parse_args()
 
@@ -312,6 +338,15 @@ def main():
     if args.algo == "guild":
         print("[INFO] Ejecutando propagación tipo GUILD (RWR)...")
         scores = run_rwr_guild(G, seeds, restart=args.restart, max_iter=args.max_iter, tol=args.tol, use_weights=args.use_weights)
+        if args.nx_pagerank:
+            print("[INFO] Usando versión rápida basada en PageRank de NetworkX.")
+            scores = run_rwr_nx(G, seeds, restart=args.restart)
+        else:
+            scores = run_rwr_guild(G, seeds,
+                                   restart=args.restart,
+                                   max_iter=args.max_iter,
+                                   tol=args.tol,
+                                   use_weights=args.use_weights)
 
         # Guardar resultados
         df = pd.DataFrame(sorted(scores.items(), key=lambda x: x[1], reverse=True),
