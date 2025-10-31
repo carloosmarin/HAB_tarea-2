@@ -292,6 +292,10 @@ def main():
     parser.add_argument("--k", type=int, default=200, help="Número de nodos a añadir (DIAMOnD)")
     parser.add_argument("--use-weights", action="store_true",
                     help="Usar el peso de las aristas (p.ej., combined_score) en la difusión")
+    parser.add_argument("--exclude-seeds", action="store_true",
+                    help="Excluir semillas del archivo de salida")
+    parser.add_argument("--top", type=int, default=0,
+                    help="Si >0, limitar la salida a los top-N nodos")
 
     args = parser.parse_args()
 
@@ -311,11 +315,30 @@ def main():
 
         # Guardar resultados
         df = pd.DataFrame(sorted(scores.items(), key=lambda x: x[1], reverse=True),
-                          columns=["node", "score"])
+                  columns=["node", "score"])
+        # Añadimos columnas auxiliares
+        df["is_seed"] = df["node"].isin(seeds)
+        # Si el usuario quiere excluir semillas
+        if args.exclude_seeds:
+            df = df[~df["is_seed"]]
+        # Añadimos ranking
+        df["rank"] = np.arange(1, len(df) + 1)
+        # Si el usuario pide limitar a top-N
+        if args.top and args.top > 0:
+            df = df.head(args.top)
+        # Cabecera con metadatos para reproducibilidad
+        meta = (
+            f"# algo=guild use_weights={args.use_weights} restart={args.restart} "
+            f"max_iter={args.max_iter} tol={args.tol} exclude_seeds={args.exclude_seeds}\n"
+            )
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(args.out, sep="\t", index=False)
-        print(f"[OK] Resultados guardados en {args.out}")
-        print(df.head().to_string(index=False))
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(meta)
+            df.to_csv(f, sep="\t", index=False)
+        print(f"[OK] Resultados guardados en: {args.out} (top 5)\n{df.head().to_string(index=False)}")
+        
+
+        
 
     elif args.algo == "diamond":
         df = run_diamond_stub(G, seeds, k=args.k)
@@ -325,7 +348,6 @@ def main():
 
     else:
         raise ValueError("Algoritmo no reconocido.")
-
-
+    
 if __name__ == "__main__":
     main()
