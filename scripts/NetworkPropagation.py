@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Tarea 2: Network Propagation
-Autor: TU NOMBRE
+Autor: Carlos Marín Martínez
 Asignatura: Herramientas de Bioinformática Avanzada
 Profesor: [nombre del profesor, si quieres incluirlo]
 
