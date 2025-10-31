@@ -9,7 +9,6 @@ __pycache__/
 *.pkl
 
 # Resultados y datos pesados
-results/
 data/*.tsv
 data/*.txt
 
