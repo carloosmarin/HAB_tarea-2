@@ -1,1 +1,18 @@
-.DS_Store
+# Entorno virtual
+.venv/
+
+# Archivos temporales de Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+
+# Resultados y datos pesados
+results/
+data/*.tsv
+data/*.txt
+
+# Configuración local de VS Code
+.vscode/
+
