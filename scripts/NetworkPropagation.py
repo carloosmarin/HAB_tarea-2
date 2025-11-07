@@ -3,8 +3,6 @@
 """
 Tarea 2: Network Propagation
 Autor: Carlos Marín Martínez
-Asignatura: Herramientas de Bioinformática Avanzada
-Profesor: [nombre del profesor, si quieres incluirlo]
 
 Descripción general
 -------------------
@@ -51,6 +49,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 from tqdm import tqdm
+import math
 
 
 # ============================================================
@@ -220,59 +219,107 @@ def run_rwr_guild(G: nx.Graph,
 
     return {nodes[i]: float(p[i]) for i in range(n)}
 
-    """
-    Implementación sencilla de Random Walk with Restart (RWR).
-
-    Fórmula:
-        p_{t+1} = (1 - α) * W_norm * p_t + α * p0
-    donde:
-      - α es el parámetro de reinicio ("restart")
-      - p0 es el vector inicial (1/n para cada semilla)
-      - W_norm es la matriz de transición normalizada por grado
-
-    Devuelve un diccionario {nodo: score}.
-    """
-    if not seeds:
-        raise ValueError("No hay semillas válidas presentes en la red.")
-
-    nodes = list(G.nodes())
-    idx = {n: i for i, n in enumerate(nodes)}
-    n = len(nodes)
-
-    p0 = np.zeros(n)
-    for s in seeds:
-        p0[idx[s]] = 1.0
-    p0 /= p0.sum()
-
-    degrees = np.array([G.degree(n) for n in nodes], dtype=float)
-    degrees[degrees == 0.0] = 1.0
-
-    p = p0.copy()
-    for _ in tqdm(range(max_iter), desc="Iterando RWR"):
-        new_p = np.zeros_like(p)
-        for u in nodes:
-            pu = p[idx[u]] / degrees[idx[u]]
-            if pu == 0.0:
-                continue
-            for v in G.neighbors(u):
-                new_p[idx[v]] += pu
-        new_p = (1 - restart) * new_p + restart * p0
-        new_p /= new_p.sum()
-        if np.linalg.norm(new_p - p, 1) < tol:
-            break
-        p = new_p
-
-    return {nodes[i]: float(p[i]) for i in range(n)}
-
-
 # ============================================================
 # (OPCIONAL) STUB: DIAMOnD-lite
 # ============================================================
 
-def run_diamond_stub(G: nx.Graph, seeds: List[str], k: int = 200) -> pd.DataFrame:
-    """Placeholder opcional para DIAMOnD."""
-    print("[AVISO] Algoritmo DIAMOnD-lite aún no implementado.", file=sys.stderr)
-    return pd.DataFrame(columns=["node", "pvalue", "step"])
+# ---------- Utilidades para DIAMOnD-lite ----------
+import math
+
+def _logC(n: int, k: int) -> float:
+    """log( combinatoria(n, k) ) usando lgamma para estabilidad numérica."""
+    if k < 0 or k > n:
+        return float("-inf")
+    return math.lgamma(n + 1) - math.lgamma(k + 1) - math.lgamma(n - k + 1)
+
+def _hypergeom_sf_nodes(N: int, K: int, n: int, x: int) -> float:
+    """
+    P(X >= x) para X ~ Hypergeom(N, K, n) con sumatorio estable en log-espacio.
+    Interpretación 'sobre nodos':
+      - N = población total (número de nodos - 1)
+      - K = número de nodos "exitosos" en la población (|S|)
+      - n = extracciones (grado del nodo candidato)
+      - x = éxitos observados (vecinos del candidato que están en S)
+    """
+    if x <= 0:
+        return 1.0
+    xmax = min(n, K)
+    if x > xmax:
+        return 0.0
+    log_den = _logC(N, n)
+    s = 0.0
+    for i in range(x, xmax + 1):
+        term_log = _logC(K, i) + _logC(N - K, n - i) - log_den
+        s += math.exp(term_log)
+    return min(1.0, max(0.0, s))
+
+
+# ============================================================
+# DIAMOnD-lite: expansión iterativa por significancia hipergeométrica
+# ============================================================
+
+def run_diamond_lite(G: nx.Graph, seeds: List[str], k: int = 200) -> pd.DataFrame:
+    """
+    Implementación ligera de DIAMOnD:
+      - S = conjunto actual (inicia en semillas)
+      - En cada paso, evalúa para cada candidato v∉S la conectividad k_s(v)
+        (nº de vecinos de v que están en S).
+      - Calcula p-valor hipergeométrico sobre NODOS:
+          N = |V| - 1
+          K = |S|
+          n = deg(v)
+          x = k_s(v)
+        p = P[X >= x] con X ~ Hypergeom(N, K, n).
+      - Añade el nodo con menor p-valor y repite hasta K pasos.
+
+    Devuelve un DataFrame con columnas: node, pvalue, step
+    (solo nodos añadidos; las semillas no aparecen en la tabla).
+    """
+    if not seeds:
+        raise ValueError("No hay semillas válidas presentes en la red.")
+
+    S = set(s for s in seeds if s in G)
+    if not S:
+        raise ValueError("Ninguna semilla está presente en la red.")
+
+    nodes_all = list(G.nodes())
+    Npop = len(nodes_all) - 1  # población para hipergeométrica "sobre nodos"
+
+    added_nodes = []
+    current_step = 0
+
+    # Precompute
+    neigh = {u: set(G.neighbors(u)) for u in nodes_all}
+    deg = {u: len(neigh[u]) for u in nodes_all}
+
+    while current_step < k:
+        # Solo consideramos candidatos con al menos 1 vecino en S (rápido)
+        candidates = [v for v in nodes_all if v not in S and len(neigh[v] & S) > 0]
+        if not candidates:
+            break
+
+        best_node, best_p = None, 1.0
+
+        for v in candidates:
+            dv = deg[v]
+            xs = len(neigh[v] & S)  # éxitos observados
+            if dv == 0 or xs <= 0:
+                pval = 1.0
+            else:
+                pval = _hypergeom_sf_nodes(Npop, len(S), dv, xs)
+            if pval < best_p:
+                best_p, best_node = pval, v
+
+        if best_node is None:
+            break
+
+        current_step += 1
+        S.add(best_node)
+        added_nodes.append((best_node, best_p, current_step))
+
+    df = pd.DataFrame(added_nodes, columns=["node", "pvalue", "step"])
+    return df
+
 
 def run_rwr_nx(G: nx.Graph, seeds: List[str], restart: float = 0.5) -> Dict[str, float]:
     """
@@ -376,10 +423,15 @@ def main():
         
 
     elif args.algo == "diamond":
-        df = run_diamond_stub(G, seeds, k=args.k)
+        print("[INFO] Ejecutando DIAMOnD-lite...")
+        df = run_diamond_lite(G, seeds, k=args.k)
         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(args.out, sep="\t", index=False)
-        print(f"[OK] (Stub) Resultados guardados en {args.out}")
+        meta = f"# algo=diamond-lite k={args.k}\n"
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(meta)
+            df.to_csv(f, sep="\t", index=False)
+        print(f"[OK] Resultados guardados en {args.out} (top 5)\n{df.head().to_string(index=False)}")
+
 
     else:
         raise ValueError("Algoritmo no reconocido.")
