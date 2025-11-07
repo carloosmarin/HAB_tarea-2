@@ -220,11 +220,12 @@ def run_rwr_guild(G: nx.Graph,
     return {nodes[i]: float(p[i]) for i in range(n)}
 
 # ============================================================
-# (OPCIONAL) STUB: DIAMOnD-lite
+# DIAMOnD-lite (implementación docente)
 # ============================================================
 
+
 # ---------- Utilidades para DIAMOnD-lite ----------
-import math
+
 
 def _logC(n: int, k: int) -> float:
     """log( combinatoria(n, k) ) usando lgamma para estabilidad numérica."""
@@ -383,17 +384,39 @@ def main():
 
     # --- 3. Ejecutar algoritmo ---
     if args.algo == "guild":
-        print("[INFO] Ejecutando propagación tipo GUILD (RWR)...")
-        scores = run_rwr_guild(G, seeds, restart=args.restart, max_iter=args.max_iter, tol=args.tol, use_weights=args.use_weights)
         if args.nx_pagerank:
-            print("[INFO] Usando versión rápida basada en PageRank de NetworkX.")
+            print("[INFO] Ejecutando propagación tipo GUILD (RWR) con versión rápida (PageRank de NetworkX)...")
             scores = run_rwr_nx(G, seeds, restart=args.restart)
         else:
-            scores = run_rwr_guild(G, seeds,
-                                   restart=args.restart,
-                                   max_iter=args.max_iter,
-                                   tol=args.tol,
-                                   use_weights=args.use_weights)
+            print("[INFO] Ejecutando propagación tipo GUILD (RWR) iterativo...")
+            scores = run_rwr_guild(
+                G, seeds,
+                restart=args.restart,
+                max_iter=args.max_iter,
+                tol=args.tol,
+                use_weights=args.use_weights
+            )
+
+        # Guardar resultados
+        df = pd.DataFrame(sorted(scores.items(), key=lambda x: x[1], reverse=True),
+                          columns=["node", "score"])
+        df["is_seed"] = df["node"].isin(seeds)
+        if args.exclude_seeds:
+            df = df[~df["is_seed"]]
+        df["rank"] = np.arange(1, len(df) + 1)
+        if args.top and args.top > 0:
+            df = df.head(args.top)
+
+        meta = (
+            f"# algo=guild use_weights={args.use_weights} restart={args.restart} "
+            f"max_iter={args.max_iter} tol={args.tol} exclude_seeds={args.exclude_seeds} "
+            f"nx_pagerank={args.nx_pagerank}\n"
+        )
+        Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+        with open(args.out, "w", encoding="utf-8") as f:
+            f.write(meta)
+            df.to_csv(f, sep="\t", index=False)
+        print(f"[OK] Resultados guardados en: {args.out} (top 5)\n{df.head().to_string(index=False)}")
 
         # Guardar resultados
         df = pd.DataFrame(sorted(scores.items(), key=lambda x: x[1], reverse=True),
